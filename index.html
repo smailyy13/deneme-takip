@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#4f46e5">
+<title>Deneme Takip</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Deneme Takip</h1>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-view="list">Denemeler</button>
+    <button class="tab" data-view="stats">Grafikler</button>
+    <button class="tab" data-view="form">+ Ekle</button>
+  </nav>
+</header>
+
+<main>
+  <!-- LİSTE -->
+  <section id="view-list" class="view active">
+    <div class="filter">
+      <button class="chip active" data-filter="ALL">Tümü</button>
+      <button class="chip" data-filter="TYT">TYT</button>
+      <button class="chip" data-filter="AYT">AYT</button>
+    </div>
+    <div id="list"></div>
+    <div class="backup">
+      <button id="exportBtn" class="btn ghost">Yedeği indir</button>
+      <label class="btn ghost">Yedek yükle<input type="file" id="importInput" accept="application/json" hidden></label>
+    </div>
+  </section>
+
+  <!-- DETAY -->
+  <section id="view-detail" class="view"></section>
+
+  <!-- GRAFİKLER -->
+  <section id="view-stats" class="view">
+    <div class="filter">
+      <button class="chip active" data-stype="TYT">TYT</button>
+      <button class="chip" data-stype="AYT">AYT</button>
+    </div>
+    <div id="stats"></div>
+  </section>
+
+  <!-- FORM -->
+  <section id="view-form" class="view">
+    <form id="form" class="card" novalidate>
+      <h2 id="formTitle">Yeni Deneme</h2>
+      <div class="seg" id="typeSeg">
+        <label><input type="radio" name="type" value="TYT" checked><span>TYT</span></label>
+        <label><input type="radio" name="type" value="AYT"><span>AYT</span></label>
+      </div>
+      <div class="row2">
+        <label class="field">Deneme adı
+          <input name="name" placeholder="ör. 3D Türkiye Geneli" required>
+        </label>
+        <label class="field">Tarih
+          <input name="date" type="date" required>
+        </label>
+      </div>
+      <p class="hint">Boş bırakılan dersler girilmemiş sayılır. Boş sayısı otomatik hesaplanır, istersen değiştirebilirsin.</p>
+      <div id="subjects"></div>
+      <div class="total" id="formTotal"></div>
+      <label class="field">İlk yorum (isteğe bağlı)
+        <textarea name="comment" rows="3" placeholder="Bu denemede neler dikkatini çekti?"></textarea>
+      </label>
+      <p class="error" id="formError"></p>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="cancelBtn">Vazgeç</button>
+        <button type="submit" class="btn">Kaydet</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
