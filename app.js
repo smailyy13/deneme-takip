@@ -18,15 +18,84 @@ const EXAMS = {
 const subjectsOf = type => EXAMS[type].flatMap(g => g.subjects);
 const maxOf = type => subjectsOf(type).reduce((s, x) => s + x[2], 0);
 
-// ---- Veri ----
-const KEY = 'deneme-takip-v1';
-let data = load();
+// ---- Veri: GitHub'daki gizli depoda data.json olarak tutulur ----
+// Cihazda yalnızca bağlantı bilgisi (depo adı + token) saklanır, denemeler değil.
+const CFG_KEY = 'deneme-takip-baglanti';
+const OLD_KEY = 'deneme-takip-v1'; // eski sürümün yerel verisi (buluta aktarmak için)
+const DEFAULT_REPO = 'smailyy13/deneme-takip-veri';
+let cfg = loadCfg();
+let data = [];
+let sha = null;
+let loaded = false;
 
-function load() {
-  try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; }
+function loadCfg() {
+  try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; } catch { return {}; }
 }
-function save() {
-  localStorage.setItem(KEY, JSON.stringify(data));
+
+const api = (method, body) => fetch(`https://api.github.com/repos/${cfg.repo}/contents/data.json`, {
+  method,
+  cache: 'no-store',
+  headers: {
+    Authorization: `Bearer ${cfg.token}`,
+    Accept: 'application/vnd.github+json',
+    ...(body && { 'Content-Type': 'application/json' }),
+  },
+  body: body && JSON.stringify(body),
+});
+const b64enc = s => { let bin = ''; for (const b of new TextEncoder().encode(s)) bin += String.fromCharCode(b); return btoa(bin); };
+const b64dec = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g, '')), c => c.charCodeAt(0)));
+
+class ApiError extends Error {}
+function errText(e) {
+  if (!(e instanceof ApiError)) return 'İnternet bağlantısını kontrol et.';
+  return {
+    401: 'Token geçersiz ya da süresi dolmuş.',
+    403: 'Token\'ın bu depoya yazma izni yok (Contents: Read and write olmalı).',
+    404: 'Depo bulunamadı ya da token\'ın bu depoya erişimi yok.',
+    silinmiş: 'Bu deneme başka bir cihazdan silinmiş.',
+    çakışma: 'Başka bir cihaz aynı anda kaydediyor, tekrar dene.',
+  }[e.message] || `GitHub hatası (${e.message}).`;
+}
+
+function setStatus(text) {
+  $('#status').textContent = text;
+}
+
+async function pull() {
+  const r = await api('GET');
+  if (!r.ok) throw new ApiError(r.status);
+  const j = await r.json();
+  sha = j.sha;
+  data = JSON.parse(b64dec(j.content) || '[]');
+  loaded = true;
+}
+
+// En güncel veriyi çekip değişikliği onun üstüne uygular; başka cihaz araya girerse tekrar dener.
+async function commit(fn, message) {
+  setStatus('Kaydediliyor…');
+  try {
+    for (let i = 0; i < 3; i++) {
+      await pull();
+      fn(data);
+      const r = await api('PUT', { message, sha, content: b64enc(JSON.stringify(data, null, 1)) });
+      if (r.ok) { sha = (await r.json()).content.sha; return true; }
+      if (r.status !== 409 && r.status !== 422) throw new ApiError(r.status);
+    }
+    throw new ApiError('çakışma');
+  } catch (e) {
+    alert('Kaydedilemedi: ' + errText(e));
+    return false;
+  } finally {
+    setStatus('');
+  }
+}
+
+async function refresh() {
+  if (!cfg.token) return;
+  setStatus('Yükleniyor…');
+  try { await pull(); } catch (e) { setStatus(''); $('#list').innerHTML = `<div class="empty-state">Veriler alınamadı: ${esc(errText(e))}<br><br><a class="btn" href="#settings">Bağlantı ayarları</a></div>`; return false; }
+  setStatus('');
+  return true;
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -59,7 +128,9 @@ function route() {
   $$('.view').forEach(v => v.classList.remove('active'));
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view || (view === 'd' && t.dataset.view === 'list') || (view === 'edit' && t.dataset.view === 'form')));
 
-  if (view === 'd' && find(id)) { renderDetail(find(id)); show('detail'); }
+  if (view === 'settings' || !cfg.token) { renderSettings(); show('settings'); }
+  else if (!loaded) { show('list'); }
+  else if (view === 'd' && find(id)) { renderDetail(find(id)); show('detail'); }
   else if (view === 'edit' && find(id)) { openForm(find(id)); show('form'); }
   else if (view === 'form') { openForm(null); show('form'); }
   else if (view === 'stats') { renderStats(); show('stats'); }
@@ -143,22 +214,32 @@ function renderDetail(ex) {
       <button class="btn ghost" onclick="go('edit/${ex.id}')">Düzenle</button>
     </div>`;
 
-  $('#commentForm').addEventListener('submit', e => {
+  // Değişiklik en güncel veriye uygulanır; deneme başka cihazdan silindiyse hata verir.
+  const onThis = fn => d => {
+    const cur = d.find(x => x.id === ex.id);
+    if (!cur) throw new ApiError('silinmiş');
+    fn(cur);
+  };
+  const reshow = () => find(ex.id) ? renderDetail(find(ex.id)) : go('list');
+
+  $('#commentForm').addEventListener('submit', async e => {
     e.preventDefault();
+    const btn = e.target.querySelector('button');
     const text = e.target.querySelector('textarea').value.trim();
     if (!text) return;
-    ex.comments.push({ id: uid(), text, at: Date.now() });
-    save(); renderDetail(ex);
+    btn.disabled = true;
+    const c = { id: uid(), text, at: Date.now() };
+    if (await commit(onThis(cur => cur.comments.push(c)), `Yorum: ${ex.name}`)) reshow();
+    else btn.disabled = false;
   });
-  $$('#comments [data-cid]').forEach(b => b.addEventListener('click', () => {
+  $$('#comments [data-cid]').forEach(b => b.addEventListener('click', async () => {
     if (!confirm('Yorum silinsin mi?')) return;
-    ex.comments = ex.comments.filter(c => c.id !== b.dataset.cid);
-    save(); renderDetail(ex);
+    await commit(onThis(cur => { cur.comments = cur.comments.filter(c => c.id !== b.dataset.cid); }), `Yorum silindi: ${ex.name}`);
+    reshow();
   }));
-  $('#delBtn').addEventListener('click', () => {
+  $('#delBtn').addEventListener('click', async () => {
     if (!confirm(`"${ex.name}" silinsin mi? Bu işlem geri alınamaz.`)) return;
-    data = data.filter(x => x.id !== ex.id);
-    save(); go('list');
+    if (await commit(d => { const i = d.findIndex(x => x.id === ex.id); if (i >= 0) d.splice(i, 1); }, `Silindi: ${ex.name}`)) go('list');
   });
 }
 
@@ -242,7 +323,7 @@ form.addEventListener('change', e => {
   if (e.target.name === 'type') buildSubjects({});
 });
 
-form.addEventListener('submit', e => {
+form.addEventListener('submit', async e => {
   e.preventDefault();
   const err = $('#formError');
   const name = form.name.value.trim();
@@ -261,18 +342,27 @@ form.addEventListener('submit', e => {
   }
   if (!Object.keys(results).length) return err.textContent = 'En az bir ders gir.';
 
+  const submitBtn = form.querySelector('[type=submit]');
+  submitBtn.disabled = true;
+  let id, ok;
   if (editing) {
-    Object.assign(editing, { type: currentType(), name, date, results });
-    save(); history.replaceState(null, '', '#d/' + editing.id); route();
+    id = editing.id;
+    ok = await commit(d => {
+      const cur = d.find(x => x.id === id);
+      if (!cur) throw new ApiError('silinmiş');
+      Object.assign(cur, { type: currentType(), name, date, results });
+    }, `Düzenlendi: ${name}`);
   } else {
     const comment = form.comment.value.trim();
     const ex = {
       id: uid(), type: currentType(), name, date, results, createdAt: Date.now(),
       comments: comment ? [{ id: uid(), text: comment, at: Date.now() }] : [],
     };
-    data.push(ex);
-    save(); history.replaceState(null, '', '#d/' + ex.id); route();
+    id = ex.id;
+    ok = await commit(d => d.push(ex), `Yeni ${ex.type} denemesi: ${name}`);
   }
+  submitBtn.disabled = false;
+  if (ok) { history.replaceState(null, '', '#d/' + id); route(); }
 });
 
 $('#cancelBtn').addEventListener('click', () => history.length > 1 ? history.back() : go('list'));
@@ -384,19 +474,95 @@ $('#exportBtn').addEventListener('click', () => {
 $('#importInput').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
+  let arr;
   try {
-    const arr = JSON.parse(await file.text());
+    arr = JSON.parse(await file.text());
     if (!Array.isArray(arr)) throw 0;
-    const ids = new Set(data.map(x => x.id));
-    const added = arr.filter(x => x && x.id && x.type in EXAMS && x.results && !ids.has(x.id))
-      .map(x => ({ comments: [], createdAt: Date.now(), ...x }));
-    data.push(...added);
-    save(); renderList();
-    alert(`${added.length} deneme yüklendi.`);
   } catch {
     alert('Dosya okunamadı.');
+    e.target.value = '';
+    return;
   }
   e.target.value = '';
+  let n = 0;
+  if (await commit(d => { n = merge(d, arr); }, 'Yedekten yüklendi')) {
+    renderList();
+    alert(`${n} deneme yüklendi.`);
+  }
 });
 
-route();
+// Yalnızca henüz olmayan denemeleri ekler; eklenen sayısını döner.
+function merge(target, arr) {
+  const ids = new Set(target.map(x => x.id));
+  const added = arr.filter(x => x && x.id && x.type in EXAMS && x.results && !ids.has(x.id))
+    .map(x => ({ comments: [], createdAt: Date.now(), ...x }));
+  target.push(...added);
+  return added.length;
+}
+
+// ---- Bağlantı ayarları ----
+function renderSettings() {
+  const f = $('#settingsForm');
+  f.repo.value = cfg.repo || DEFAULT_REPO;
+  f.token.value = cfg.token || '';
+  $('#settingsError').textContent = '';
+  $('#disconnectBtn').hidden = !cfg.token;
+}
+
+$('#settingsForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target;
+  const next = { repo: f.repo.value.trim().replace(/^https:\/\/github\.com\//, '').replace(/\/$/, ''), token: f.token.value.trim() };
+  if (!/^[\w.-]+\/[\w.-]+$/.test(next.repo)) return $('#settingsError').textContent = 'Depo "kullanıcı/depo" biçiminde olmalı.';
+  if (!next.token) return $('#settingsError').textContent = 'Token\'ı yapıştır.';
+  const prev = cfg;
+  cfg = next;
+  setStatus('Bağlanıyor…');
+  try {
+    await pull();
+  } catch (err) {
+    cfg = prev;
+    setStatus('');
+    return $('#settingsError').textContent = errText(err);
+  }
+  setStatus('');
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {}
+  await migrateLocal();
+  go('list'); route();
+});
+
+$('#disconnectBtn').addEventListener('click', () => {
+  if (!confirm('Bu cihazın bağlantısı kesilsin mi? Veriler GitHub\'da kalır.')) return;
+  try { localStorage.removeItem(CFG_KEY); } catch {}
+  cfg = {}; data = []; loaded = false; sha = null;
+  route();
+});
+
+// Eski sürümde bu cihaza kaydedilmiş denemeleri buluta taşır.
+async function migrateLocal() {
+  let old;
+  try { old = JSON.parse(localStorage.getItem(OLD_KEY)); } catch {}
+  if (!Array.isArray(old) || !old.length) return;
+  if (!confirm(`Bu cihazda daha önce kaydedilmiş ${old.length} deneme var. GitHub'a aktarılsın mı?`)) return;
+  if (await commit(d => merge(d, old), 'Cihazdaki eski denemeler aktarıldı')) {
+    try { localStorage.removeItem(OLD_KEY); } catch {}
+  }
+}
+
+// Sayfaya geri dönünce diğer cihazlardaki değişiklikleri çek (form açıkken dokunma).
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !cfg.token) return;
+  const view = (location.hash.slice(1) || 'list').split('/')[0];
+  if (view === 'form' || view === 'edit' || view === 'settings') return;
+  if (await refresh()) route();
+});
+
+(async () => {
+  if (cfg.token) {
+    $('#list').innerHTML = '<div class="empty-state">Yükleniyor…</div>';
+    route();
+    if (await refresh()) { await migrateLocal(); route(); }
+  } else {
+    route();
+  }
+})();

@@ -9,7 +9,11 @@
 </head>
 <body>
 <header class="topbar">
-  <h1>Deneme Takip</h1>
+  <div class="titlebar">
+    <h1>Deneme Takip</h1>
+    <span id="status" class="status" aria-live="polite"></span>
+    <a href="#settings" class="gear" aria-label="Bağlantı ayarları" title="Bağlantı ayarları">⚙︎</a>
+  </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-view="list">Denemeler</button>
     <button class="tab" data-view="stats">Grafikler</button>
@@ -42,6 +46,35 @@
       <button class="chip" data-stype="AYT">AYT</button>
     </div>
     <div id="stats"></div>
+  </section>
+
+  <!-- BAĞLANTI AYARLARI -->
+  <section id="view-settings" class="view">
+    <form id="settingsForm" class="card" novalidate>
+      <h2>GitHub bağlantısı</h2>
+      <p class="hint">Denemeler GitHub'daki gizli bir depoda tutulur, böylece tüm cihazlarında aynı verileri görürsün. Her cihazda bir kez token girmen yeterli.</p>
+      <label class="field">Veri deposu
+        <input name="repo" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label class="field">Token
+        <input name="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…">
+      </label>
+      <p class="error" id="settingsError"></p>
+      <div class="actions">
+        <button type="button" class="btn danger" id="disconnectBtn" hidden>Bağlantıyı kes</button>
+        <button type="submit" class="btn">Bağlan</button>
+      </div>
+      <details class="howto">
+        <summary>Token nasıl alınır?</summary>
+        <ol>
+          <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → Fine-grained token oluştur</a> sayfasını aç.</li>
+          <li>Bir ad ver, süreyi istediğin kadar uzun seç.</li>
+          <li><b>Repository access</b> → <b>Only select repositories</b> → veri deposunu seç.</li>
+          <li><b>Permissions</b> → <b>Contents</b> → <b>Read and write</b>.</li>
+          <li>Oluştur, çıkan token'ı kopyalayıp buraya yapıştır.</li>
+        </ol>
+      </details>
+    </form>
   </section>
 
   <!-- FORM -->
